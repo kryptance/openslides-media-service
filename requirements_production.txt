@@ -1,4 +1,4 @@
--r requirements_production.txt
+-r requirements_common.txt
 
 # authlib
 git+https://github.com/OpenSlides/openslides-auth-service.git@6548f50ca778ab4f27e530886080f1482681929d#egg=authlib&subdirectory=auth/libraries/pip-auth

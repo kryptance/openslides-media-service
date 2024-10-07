@@ -1,11 +1,26 @@
-build-dev:
+prepare:
 	rm -rf pip-auth
+ifeq ($(GITHUB_ACTIONS),true)
+	echo "Running in GitHub Actions CI environment."
+	echo 'git+https://github.com/kryptance/openslides-auth-service.git@main#egg=authlib&subdirectory=libraries/pip-auth' > requirements_authlib.txt
+else
+	echo '-e /pip-auth' > requirements_authlib.txt
 	cp -r ../openslides-auth-service/libraries/pip-auth pip-auth
-	docker build . -f Dockerfile.dev --tag openslides-media-dev
+endif
+
+clean:
 	rm -rf pip-auth
+	rm -f requirements_authlib.txt
+
+build-dev:
+	$(MAKE) prepare
+	docker build . -f Dockerfile.dev --tag openslides-media-dev
+	$(MAKE) clean
 
 build-tests:
+	$(MAKE) prepare
 	docker build . -f Dockerfile.tests --tag openslides-media-tests
+	$(MAKE) clean
 
 build-dummy-autoupdate:
 	docker build . -f tests/dummy_autoupdate/Dockerfile.dummy_autoupdate --tag openslides-media-dummy-autoupdate
