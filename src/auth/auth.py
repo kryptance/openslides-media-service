@@ -1,5 +1,3 @@
-from urllib import parse
-
 import requests
 from flask import current_app as app
 from flask import request
@@ -9,15 +7,15 @@ from os_authlib import (
     AUTHENTICATION_HEADER,
     AuthenticateException,
     AuthHandler,
-    InvalidCredentialsException,
-)
-from .exceptions import ServerError
+    InvalidCredentialsException, )
+from ..exceptions import ServerError
 
 
 def get_user_id():
     """Returns the user id from the auth cookie."""
     auth_handler = AuthHandler(app.logger.debug)
     authentication = request.headers.get(AUTHENTICATION_HEADER, "")
+    app.logger.debug(f"Get user id from auth header: {authentication}")
     try:
         (user_id, _) = auth_handler.authenticate(authentication)
     except (AuthenticateException, InvalidCredentialsException):

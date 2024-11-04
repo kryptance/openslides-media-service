@@ -4,49 +4,48 @@ import json
 import sys
 from signal import SIGINT, SIGTERM, signal
 
-import requests
-from authlib.jose import JsonWebKey, jwt
-from authlib.oauth2.rfc9068 import JWTBearerTokenValidator
-from authlib.oidc.discovery import get_well_known_url, OpenIDProviderMetadata
+from authlib.integrations.flask_oauth2 import ResourceProtector
+from authlib.oauth2 import OAuth2Error
 from flask import Flask, Response, jsonify, redirect, request
+from flask import json
 
-from .auth import AUTHENTICATION_HEADER, check_file_id, check_login
+from .auth.auth import AUTHENTICATION_HEADER, check_file_id, check_login
+from .auth.token_validator import JWTBearerOpenSlidesTokenValidator
 from .config_handling import init_config, is_dev_mode
 from .database import Database
 from .exceptions import BadRequestError, HttpError, NotFoundError
 from .logging import init_logging
-from authlib.integrations.flask_oauth2 import ResourceProtector, current_token
+import os
 
 cache = {}
 
-# Keycloak settings
-KEYCLOAK_DOMAIN = 'http://keycloak:8080'
-KEYCLOAK_REALM = 'os'
-ISSUER = f"{KEYCLOAK_DOMAIN}/realms/{KEYCLOAK_REALM}"
+KEYCLOAK_REALM = os.environ.get("OPENSLIDES_AUTH_REALM")
+KEYCLOAK_URL = os.environ.get("OPENSLIDES_KEYCLOAK_URL")
+ISSUER_REAL = os.environ.get("OPENSLIDES_TOKEN_ISSUER")
 
-class MyBearerTokenValidator(JWTBearerTokenValidator):
-    # Cache the JWKS keys to avoid fetching them repeatedly
-    jwk_set = None
+assert ISSUER_REAL is not None, "OPENSLIDES_TOKEN_ISSUER must be set in environment"
+assert KEYCLOAK_REALM is not None, "OPENSLIDES_AUTH_REALM must be set in environment"
+assert KEYCLOAK_URL is not None, "OPENSLIDES_KEYCLOAK_URL must be set in environment"
 
-    def get_jwks_key_set(self):
-        if self.jwk_set is None:
-            oidc_configuration = OpenIDProviderMetadata(requests.get(get_well_known_url(ISSUER)).json())
-            response = requests.get(oidc_configuration.get('jwks_uri'))
-            response.raise_for_status()
-            jwks_keys = response.json()
-            self.jwk_set = JsonWebKey.import_key_set(jwks_keys)
-        return self.jwk_set
+ISSUER_INTERNAL = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}"
 
-    def verify_token(self, token):
-        try:
-            claims = jwt.decode(token, key=self.get_jwks_key_set())
-            claims.validate()
-            return claims
-        except Exception as e:
-            return None
+
+# class MyCustomResourceProtector(ResourceProtector):
+
+    # def validate_request(self, scopes, request, **kwargs):
+    #     """Validate the request and return a token."""
+    #     validator, token_string = self.parse_request_authorization(request)
+    #     app.logger.debug(f"Validating request with {validator} and {token_string}")
+    #     validator.validate_request(request)
+    #     app.logger.debug(f"Request validated")
+    #     token = validator.authenticate_token(token_string)
+    #     app.logger.debug(f"Token authenticated: {token}")
+    #     validator.validate_token(token, scopes, request, **kwargs)
+    #     app.logger.debug(f"Token validated")
+    #     return token
 
 require_oauth = ResourceProtector()
-require_oauth.register_token_validator(MyBearerTokenValidator(ISSUER, 'https://localhost:8000/system'))
+require_oauth.register_token_validator(JWTBearerOpenSlidesTokenValidator(ISSUER_REAL, ISSUER_INTERNAL, 'os'))
 
 app = Flask(__name__)
 with app.app_context():
@@ -54,19 +53,36 @@ with app.app_context():
     init_config()
     database = Database()
 
+app.debug = True
 app.logger.info("Started media server")
 
 
-@app.errorhandler(HttpError)
+@app.errorhandler(Exception)
 def handle_view_error(error):
-    app.logger.error(
-        f"Request to {request.path} resulted in {error.status_code}: "
-        f"{error.message}"
-    )
-    res_content = {"message": f"Media-Server: {error.message}"}
-    response = jsonify(res_content)
-    response.status_code = error.status_code
-    return response
+    if isinstance(error, HttpError):
+        app.logger.error(
+            f"Request to {request.path} resulted in {error.status_code}: "
+            f"{error.message}"
+        )
+        res_content = {"message": f"Media-Server: {error.message}"}
+        response = jsonify(res_content)
+        response.status_code = error.status_code
+        return response
+    elif isinstance(error, OAuth2Error):
+        app.logger.error(
+            f"Request to {request.path} resulted in {error.status_code}: "
+            f"{error.description} (AuthlibHTTPError)"
+        )
+        res_content = {"message": f"Media-Server: {error.description}"}
+        response = jsonify(res_content)
+        response.status_code = error.status_code
+        return response
+    else:
+        app.logger.error(f"Request to {request.path} resulted in {error} ({type(error)})")
+        res_content = {"message": "Media-Server: Internal Server Error"}
+        response = jsonify(res_content)
+        response.status_code = 500
+        return response
 
 
 @app.route("/system/media/get/<int:file_id>")
