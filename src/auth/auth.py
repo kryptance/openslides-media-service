@@ -3,7 +3,6 @@ from flask import current_app as app
 from flask import request
 
 from os_authlib import (
-    ANONYMOUS_USER,
     AUTHENTICATION_HEADER,
     AuthenticateException,
     AuthHandler,
@@ -28,7 +27,7 @@ def check_login():
     user_id = get_user_id()
     if user_id == -1:
         return False
-    return user_id != ANONYMOUS_USER
+    return True
 
 
 def check_file_id(file_id, autoupdate_headers):

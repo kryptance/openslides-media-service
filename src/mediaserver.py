@@ -88,7 +88,7 @@ def handle_view_error(error):
 @app.route("/system/media/get/<int:file_id>")
 @require_oauth()
 def serve(file_id):
-    if not check_login():
+    if not check_login_valid():
         return redirect("/")
 
     # get file id
