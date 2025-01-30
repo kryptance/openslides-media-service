@@ -1,51 +1,21 @@
 import atexit
 import base64
 import json
+import os
 import sys
 from signal import SIGINT, SIGTERM, signal
 
-from authlib.integrations.flask_oauth2 import ResourceProtector
+from authlib.integrations.flask_oauth2 import ResourceProtector, current_token
 from authlib.oauth2 import OAuth2Error
 from flask import Flask, Response, jsonify, redirect, request
 from flask import json
 
-from .auth.auth import AUTHENTICATION_HEADER, check_file_id, check_login
-from .auth.token_validator import JWTBearerOpenSlidesTokenValidator
+from os_authlib.token_validator import create_openslides_token_validator
+from .auth.auth import AUTHENTICATION_HEADER, check_file_id
 from .config_handling import init_config, is_dev_mode
 from .database import Database
 from .exceptions import BadRequestError, HttpError, NotFoundError
 from .logging import init_logging
-import os
-
-cache = {}
-
-KEYCLOAK_REALM = os.environ.get("OPENSLIDES_AUTH_REALM")
-KEYCLOAK_URL = os.environ.get("OPENSLIDES_KEYCLOAK_URL")
-ISSUER_REAL = os.environ.get("OPENSLIDES_TOKEN_ISSUER")
-
-assert ISSUER_REAL is not None, "OPENSLIDES_TOKEN_ISSUER must be set in environment"
-assert KEYCLOAK_REALM is not None, "OPENSLIDES_AUTH_REALM must be set in environment"
-assert KEYCLOAK_URL is not None, "OPENSLIDES_KEYCLOAK_URL must be set in environment"
-
-ISSUER_INTERNAL = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}"
-
-
-# class MyCustomResourceProtector(ResourceProtector):
-
-    # def validate_request(self, scopes, request, **kwargs):
-    #     """Validate the request and return a token."""
-    #     validator, token_string = self.parse_request_authorization(request)
-    #     app.logger.debug(f"Validating request with {validator} and {token_string}")
-    #     validator.validate_request(request)
-    #     app.logger.debug(f"Request validated")
-    #     token = validator.authenticate_token(token_string)
-    #     app.logger.debug(f"Token authenticated: {token}")
-    #     validator.validate_token(token, scopes, request, **kwargs)
-    #     app.logger.debug(f"Token validated")
-    #     return token
-
-require_oauth = ResourceProtector()
-require_oauth.register_token_validator(JWTBearerOpenSlidesTokenValidator(ISSUER_REAL, ISSUER_INTERNAL, 'os'))
 
 app = Flask(__name__)
 with app.app_context():
@@ -53,50 +23,50 @@ with app.app_context():
     init_config()
     database = Database()
 
+app.config['DEBUG'] = True
 app.debug = True
-app.logger.info("Started media server")
 
+require_oauth = ResourceProtector()
+require_oauth.register_token_validator(create_openslides_token_validator())
 
 @app.errorhandler(Exception)
 def handle_view_error(error):
-    if isinstance(error, HttpError):
-        app.logger.error(
-            f"Request to {request.path} resulted in {error.status_code}: "
-            f"{error.message}"
-        )
-        res_content = {"message": f"Media-Server: {error.message}"}
-        response = jsonify(res_content)
-        response.status_code = error.status_code
-        return response
-    elif isinstance(error, OAuth2Error):
-        app.logger.error(
-            f"Request to {request.path} resulted in {error.status_code}: "
-            f"{error.description} (AuthlibHTTPError)"
-        )
-        res_content = {"message": f"Media-Server: {error.description}"}
-        response = jsonify(res_content)
-        response.status_code = error.status_code
-        return response
-    else:
-        app.logger.error(f"Request to {request.path} resulted in {error} ({type(error)})")
-        res_content = {"message": "Media-Server: Internal Server Error"}
-        response = jsonify(res_content)
-        response.status_code = 500
-        return response
+    raise error
+    # if isinstance(error, HttpError):
+    #     app.logger.error(
+    #         f"Request to {request.path} resulted in {error.status_code}: "
+    #         f"{error.message}"
+    #     )
+    #     res_content = {"message": f"Media-Server: {error.message}"}
+    #     response = jsonify(res_content)
+    #     response.status_code = error.status_code
+    #     return response
+    # elif isinstance(error, OAuth2Error):
+    #     app.logger.error(
+    #         f"Request to {request.path} resulted in {error.status_code}: "
+    #         f"{error.description} (AuthlibHTTPError)"
+    #     )
+    #     res_content = {"message": f"Media-Server: {error.description}"}
+    #     response = jsonify(res_content)
+    #     response.status_code = error.status_code
+    #     return response
+    # else:
+    #     app.logger.error(f"Request to {request.path} resulted in {error} ({type(error)})")
+    #     res_content = {"message": "Media-Server: Internal Server Error"}
+    #     response = jsonify(res_content)
+    #     response.status_code = 500
+    #     return response
 
 
 @app.route("/system/media/get/<int:file_id>")
 @require_oauth()
 def serve(file_id):
-    if not check_login_valid():
-        return redirect("/")
-
     # get file id
     autoupdate_headers = dict(request.headers)
     del_keys = [key for key in autoupdate_headers if "content" in key]
     for key in del_keys:
         del autoupdate_headers[key]
-    ok, filename, auth_header = check_file_id(file_id, autoupdate_headers)
+    ok, filename, auth_header = check_file_id(file_id, autoupdate_headers, current_token.os_uid)
     if not ok:
         raise NotFoundError()
 

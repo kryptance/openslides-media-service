@@ -6,15 +6,15 @@ from os_authlib import (
     AUTHENTICATION_HEADER,
     AuthenticateException,
     AuthHandler,
-    InvalidCredentialsException, )
+    InvalidCredentialsException, AUTHORIZATION_HEADER, )
 from ..exceptions import ServerError
 
 
 def get_user_id():
     """Returns the user id from the auth cookie."""
     auth_handler = AuthHandler(app.logger.debug)
-    authentication = request.headers.get(AUTHENTICATION_HEADER, "")
-    app.logger.debug(f"Get user id from auth header: {authentication}")
+    authentication = request.headers.get(AUTHORIZATION_HEADER, "")
+    app.logger.info(f"Get user id from auth header: {authentication}")
     try:
         (user_id, _) = auth_handler.authenticate(authentication)
     except (AuthenticateException, InvalidCredentialsException):
@@ -30,13 +30,12 @@ def check_login():
     return True
 
 
-def check_file_id(file_id, autoupdate_headers):
+def check_file_id(file_id, autoupdate_headers, user_id):
     """
     Returns a triple: ok, filename, auth_header.
     filename is given, if ok=True. If ok=false, the user has no perms.
     if auth_header is returned, it must be set in the response.
     """
-    user_id = get_user_id()
     if user_id == -1:
         raise ServerError("Could not find authentication")
 
@@ -73,7 +72,7 @@ def check_file_id(file_id, autoupdate_headers):
     if not isinstance(content, dict):
         raise ServerError("The returned content is not a dict.")
 
-    auth_header = response.headers.get(AUTHENTICATION_HEADER)
+    auth_header = response.headers.get(AUTHORIZATION_HEADER)
 
     if (
             f"mediafile/{file_id}/id" not in content
